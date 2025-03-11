@@ -1,0 +1,6 @@
+board:
+  name: deneme_board_nrf52840
+  full_name: Deneme Board nRF52840
+  vendor: Fizix
+  socs:
+    - name: nrf52840
