@@ -3,18 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/ {
+ / {
     chosen {
         zephyr,flash = &flash0;
-        //zephyr,code-partition = &slot0_partition;
         zephyr,console = &uart0;
         zephyr,shell-uart = &uart0;
         zephyr,uart-mcumgr = &uart0;
     };
-    
+
     aliases {
         watchdog0 = &wdt0;
-        pdm-dev = &pdm0;
     };
 };
 
@@ -28,27 +26,7 @@
     pinctrl-names = "default", "sleep";
 };
 
-/* QSPI Configuration */
-&qspi {
+/* Watchdog Configuration */
+&wdt0 {
     status = "okay";
-    pinctrl-0 = <&qspi_default>;
-    pinctrl-1 = <&qspi_sleep>;
-    pinctrl-names = "default", "sleep";
-    qspi_flash: gd25q16@0 {
-        compatible = "nordic,qspi-nor";
-        reg = <0>;
-        sck-frequency = <8000000>;
-        size = <16777216>;
-        jedec-id = [c8 40 15];
-        writeoc = "pp4io";
-        readoc = "read4io";
-    };
-};
-
-/* PDM Configuration */
-dmic_dev: &pdm0 {
-	status = "okay";
-	pinctrl-0 = <&pdm0_default_alt>;
-	pinctrl-names = "default";
-	clock-source = "PCLK32M_HFXO";
 };
