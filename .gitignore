@@ -53,4 +53,5 @@ dkms.conf
 
 # Zephyr build output
 build/
+builds/
 .vscode/settings.json

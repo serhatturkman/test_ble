@@ -1,4 +1,0 @@
-
-# Basic Thread Example Application configuration options
-
-source "Kconfig.zephyr"

@@ -1,0 +1,4 @@
+/* Watchdog Configuration */
+&wdt0 {
+    status = "okay";
+};

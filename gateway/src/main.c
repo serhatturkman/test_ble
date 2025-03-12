@@ -9,8 +9,26 @@
  */
 
 /* Gateway Application - BLE Central */
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/__assert.h>
 
-#include "zephyr.h"
+#include <zephyr/logging/log.h>
+
+
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gap.h>
+
+/* size of stack area used by each thread */
+#define STACKSIZE 1024
+
+/* scheduling priority used by each thread */
+#define PRIORITY 7
 
 #define CONFIG_UPDATE_INTERVAL K_MINUTES(5)
 #define MAX_SENSOR_DATA_SIZE 2048
@@ -19,22 +37,11 @@
 static struct bt_conn *default_conn;
 static uint8_t config_data[CONFIG_DATA_SIZE] = {0};
 
-/* Function to get RTC timestamp */
-static uint64_t get_rtc_timestamp_ms(void) {
-    const struct device *rtc_dev = DEVICE_DT_GET(DT_NODELABEL(rtc0));
-    if (!device_is_ready(rtc_dev)) {
-        printk("RTC device not ready\n");
-        return 0;
-    }
-    uint32_t ticks;
-    counter_get_value(rtc_dev, &ticks);
-    return (uint64_t)ticks;
-}
 
-/* Callback when data is received from a node */
-static void node_data_received(struct bt_conn *conn, const uint8_t *data, uint16_t len) {
-    uint64_t timestamp = get_rtc_timestamp_ms();
-    printk("[%llu ms] [Gateway] Received data from Node (len: %d)\n", timestamp, len);
+
+/* Function to get RTC timestamp */
+static int get_rtc_timestamp_ms(void) {
+    return 0;
 }
 
 /* Callback when connection is established */
@@ -75,7 +82,7 @@ static void send_configuration_update(void) {
     printk("[%llu ms] [Gateway] Sending configuration update to Node\n", timestamp);
 }
 
-void main(void) {
+void bluetooth_connection(void) {
     int err;
     printk("[Gateway] Starting BLE Central application\n");
 
@@ -95,3 +102,5 @@ void main(void) {
         k_sleep(CONFIG_UPDATE_INTERVAL);
     }
 }
+
+K_THREAD_DEFINE(bluetooth_connection_id, STACKSIZE, bluetooth_connection, NULL, NULL, NULL, PRIORITY, 0, 0);
