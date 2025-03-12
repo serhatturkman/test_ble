@@ -1,8 +1,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/sys/printk.h>
-#include <zephyr/sys/__assert.h>
-#include <zephyr/logging/log.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/conn.h>
@@ -10,54 +8,79 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gap.h>
 
-/* size of stack area used by each thread */
+/* Thread Configuration */
 #define STACKSIZE 1024
-
-/* scheduling priority used by each thread */
 #define PRIORITY 7
 
 #define CONFIG_UPDATE_INTERVAL K_MINUTES(5)
-#define MAX_SENSOR_DATA_SIZE 2048
+#define SCAN_TIMEOUT K_SECONDS(30)
+#define SCAN_RETRY_INTERVAL K_SECONDS(10)
+
+#define SENSOR_DATA_SIZE 20
 #define CONFIG_DATA_SIZE 100
 
-static struct bt_conn *default_conn;
+static struct bt_conn *default_conn = NULL;
+static struct bt_gatt_subscribe_params subscribe_params;
 static uint8_t config_data[CONFIG_DATA_SIZE] = {0};
+static uint16_t config_handle = 0;  // Will store the characteristic handle for config writes
+
+static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                             struct bt_gatt_discover_params *params);
 
 /* Scan parameters */
 static const struct bt_le_scan_param scan_params = {
     .type       = BT_HCI_LE_SCAN_PASSIVE,
     .options    = BT_LE_SCAN_OPT_NONE,
-    .interval   = 0x0010,  // 10 ms
-    .window     = 0x0010,  // 10 ms
+    .interval   = 0x0010,  
+    .window     = 0x0010,  
 };
 
-/* Forward declaration of device_found function */
-static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
-                         struct net_buf_simple *ad);
+static struct bt_gatt_discover_params discover_params = {
+    .uuid = NULL,  
+    .func = discover_func,  // ✅ Correct function assignment
+    .start_handle = 0x0001,
+    .end_handle = 0xFFFF,
+    .type = BT_GATT_DISCOVER_ATTRIBUTE
+};
 
+/* Callback function for receiving sensor data */
+static uint8_t sensor_data_received(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                                    const void *data, uint16_t len) {
+    printk("[Gateway] Received Sensor Data (%d bytes)\n", len);
+    
+    const uint8_t *received_data = (const uint8_t *)data;
+    printk("[Gateway] Data: %02X %02X %02X ...\n", received_data[0], received_data[1], received_data[2]);
 
-/* Function to get RTC timestamp (stub) */
-static int get_rtc_timestamp_ms(void) {
-    return 0;
+    return BT_GATT_ITER_CONTINUE;
 }
 
-/* Callback when connection is established */
+/* BLE Connection Callback */
 static void connected(struct bt_conn *conn, uint8_t err) {
     if (err) {
         printk("[Gateway] Connection failed (err %d)\n", err);
         return;
     }
+    
     printk("[Gateway] Connected to Node!\n");
     default_conn = conn;
+
+    int ret = bt_gatt_discover(conn, &discover_params);
+    if (ret) {
+        printk("[Gateway] Failed to start discovery (err %d)\n", ret);
+    } else {
+        printk("[Gateway] Started GATT service discovery...\n");
+    }
 }
 
-/* Callback when connection is disconnected */
+/* BLE Disconnection Callback */
 static void disconnected(struct bt_conn *conn, uint8_t reason) {
     printk("[Gateway] Disconnected (reason %d)\n", reason);
     default_conn = NULL;
 
-    /* Restart scanning if disconnected */
-    int err = bt_le_scan_start(&scan_params, device_found);
+    /* Wait before restarting scan */
+    k_sleep(K_SECONDS(5));
+
+    int err = bt_le_scan_start(&scan_params, NULL);
     if (err) {
         printk("[Gateway] Scanning failed to restart (err %d)\n", err);
     } else {
@@ -71,34 +94,63 @@ static struct bt_conn_cb conn_callbacks = {
     .disconnected = disconnected,
 };
 
-/* Function to update and send configuration to Node */
+/* GATT Discovery Callback */
+static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                             struct bt_gatt_discover_params *params) {
+    if (!attr) {
+        printk("[Gateway] Discovery complete. No matching attribute found.\n");
+        return BT_GATT_ITER_STOP;
+    }
+
+    uint16_t handle = attr->handle;
+    printk("[Gateway] Discovered Attribute Handle: 0x%04X\n", handle);
+
+    if (!subscribe_params.ccc_handle) {
+        /* Found the Notify Characteristic for Sensor Data */
+        subscribe_params.ccc_handle = handle;
+        subscribe_params.notify = sensor_data_received;
+        
+        int err = bt_gatt_subscribe(conn, &subscribe_params);
+        if (err) {
+            printk("[Gateway] Subscription failed (err %d)\n", err);
+        } else {
+            printk("[Gateway] Subscribed to sensor data!\n");
+        }
+    } else if (!config_handle) {
+        /* Found the Config Write Characteristic */
+        config_handle = handle;
+        printk("[Gateway] Found Config Write Handle: 0x%04X\n", config_handle);
+    }
+
+    return BT_GATT_ITER_STOP;
+}
+
+
+
+/* Send Configuration Update */
 static void send_configuration_update(void) {
     if (!default_conn) {
         printk("[Gateway] No active connection. Skipping config update.\n");
         return;
     }
 
-    /* Modify some values in the config data */
+    if (config_handle == 0) {
+        printk("[Gateway] Config handle not found. Skipping config update.\n");
+        return;
+    }
+
     config_data[0]++;
     config_data[1]++;
 
-    /* Simulate sending configuration update */
-    uint64_t timestamp = get_rtc_timestamp_ms();
-    printk("[%llu ms] [Gateway] Sending configuration update to Node\n", timestamp);
-}
-
-static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
-                         struct net_buf_simple *ad) {
-    char addr_str[BT_ADDR_LE_STR_LEN];
-
-    /* Corrected macros */
-    if (type == BT_GAP_ADV_TYPE_ADV_IND || type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
-        bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-        printk("[Gateway] Device found: %s (RSSI %d)\n", addr_str, rssi);
+    int err = bt_gatt_write_without_response(default_conn, config_handle, config_data, CONFIG_DATA_SIZE, false);
+    if (err) {
+        printk("[Gateway] Config update failed (err %d)\n", err);
+    } else {
+        printk("[Gateway] Config update sent to Node\n");
     }
 }
 
-
+/* Bluetooth Connection Handler */
 void bluetooth_connection(void) {
     int err;
     printk("[Gateway] Starting BLE Central application\n");
@@ -112,16 +164,20 @@ void bluetooth_connection(void) {
 
     bt_conn_cb_register(&conn_callbacks);
 
-    /* Start scanning for nodes */
-    err = bt_le_scan_start(&scan_params, device_found);
-    if (err) {
-        printk("[Gateway] Scanning failed to start (err %d)\n", err);
-        return;
-    }
-    printk("[Gateway] Scanning started\n");
-
     while (1) {
-        if (default_conn) {
+        if (!default_conn) {
+            printk("[Gateway] Scanning for nodes (Timeout: 30s)...\n");
+            err = bt_le_scan_start(&scan_params, NULL);
+            if (err) {
+                printk("[Gateway] Scanning failed to start (err %d)\n", err);
+                k_sleep(SCAN_RETRY_INTERVAL);
+                continue;
+            }
+            k_sleep(SCAN_TIMEOUT);
+            bt_le_scan_stop();
+            printk("[Gateway] Scan timeout, retrying in 10s...\n");
+            k_sleep(SCAN_RETRY_INTERVAL);
+        } else {
             send_configuration_update();
         }
         k_sleep(CONFIG_UPDATE_INTERVAL);
