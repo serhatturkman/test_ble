@@ -22,9 +22,10 @@ static struct bt_gatt_notify_params notify_params;
 
 /* BLE Advertising Data */
 static const struct bt_data ad[] = {
-    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)), 
-    BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(0x180A))           
+    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),  
+    BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(0x180F))  // Ensure this is included
 };
+
 
 /* BLE Advertising Parameters */
 static struct bt_le_adv_param adv_params = {
@@ -62,31 +63,7 @@ static struct bt_conn_cb conn_callbacks = {
     .disconnected = disconnected,
 };
 
-/* Sensor Data Notification */
-static void send_sensor_data(void) {
-    if (!current_conn) {
-        printk("[Node] No active connection. Skipping data send.\n");
-        return;
-    }
 
-    // Fill sensor data with mock values
-    for (int i = 0; i < SENSOR_DATA_SIZE; i++) {
-        sensor_data[i] = i;
-    }
-
-    notify_params.attr = NULL; // Auto-detect attribute
-    notify_params.data = sensor_data;
-    notify_params.len = SENSOR_DATA_SIZE;
-    notify_params.func = NULL; // No callback
-    notify_params.user_data = NULL;
-
-    int err = bt_gatt_notify_cb(current_conn, &notify_params);
-    if (err) {
-        printk("[Node] Failed to send sensor data (err %d)\n", err);
-    } else {
-        printk("[Node] Sensor data sent!\n");
-    }
-}
 
 /* Callback for Configuration Write */
 static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
@@ -112,6 +89,32 @@ BT_GATT_SERVICE_DEFINE(node_service,
         BT_GATT_PERM_WRITE,
         NULL, write_config, config_data)
 );
+
+/* Sensor Data Notification */
+static void send_sensor_data(void) {
+    if (!current_conn) {
+        printk("[Node] No active connection. Skipping data send.\n");
+        return;
+    }
+
+    // Fill sensor data with mock values
+    for (int i = 0; i < SENSOR_DATA_SIZE; i++) {
+        sensor_data[i] = i;
+    }
+
+    notify_params.attr = &node_service.attrs[1]; // Point to Notify Characteristic
+    notify_params.data = sensor_data;
+    notify_params.len = SENSOR_DATA_SIZE;
+    notify_params.func = NULL;
+    notify_params.user_data = NULL;
+
+    int err = bt_gatt_notify_cb(current_conn, &notify_params);
+    if (err) {
+        printk("[Node] Failed to send sensor data (err %d)\n", err);
+    } else {
+        printk("[Node] Sensor data sent!\n");
+    }
+}
 
 /* Function to initialize BLE */
 static void init_ble(void) {
