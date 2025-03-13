@@ -15,32 +15,49 @@
 #define SENSOR_DATA_SIZE 20
 
 static uint8_t sensor_data[SENSOR_DATA_SIZE] = {0}; // Mock sensor data
-static uint8_t config_data[100] = {0}; // Received config data
+static uint8_t config_data[100] = {0};              // Received config data
 
 static struct bt_conn *current_conn = NULL;
 static struct bt_gatt_notify_params notify_params;
 
-/* BLE Advertising Data */
+static void adv_sent_cb(struct bt_le_ext_adv *adv,
+			struct bt_le_ext_adv_sent_info *info);
+
+static struct bt_le_ext_adv_cb adv_callbacks = {
+	.sent = adv_sent_cb,
+};
+
 static const struct bt_data ad[] = {
-    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),  
-    BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(0x180F))  // Ensure this is included
+    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
+static struct bt_le_adv_param param =
+    BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_EXT_ADV |
+                             BT_LE_ADV_OPT_USE_IDENTITY,
+                         BT_GAP_ADV_FAST_INT_MIN_2,
+                         BT_GAP_ADV_FAST_INT_MAX_2,
+                         NULL);
 
-/* BLE Advertising Parameters */
-static struct bt_le_adv_param adv_params = {
-    .id = BT_ID_DEFAULT,
-    .sid = 0,
-    .secondary_max_skip = 0,
-    .options = BT_LE_ADV_OPT_USE_NAME,
-    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
-    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
-    .peer = NULL
+static struct bt_le_per_adv_param per_adv_param = {
+    .interval_min = BT_GAP_PER_ADV_SLOW_INT_MIN,
+    .interval_max = BT_GAP_PER_ADV_SLOW_INT_MAX,
+    .options = BT_LE_ADV_OPT_USE_TX_POWER,
 };
+
+static struct bt_le_ext_adv *adv_set;
+
+static void adv_sent_cb(struct bt_le_ext_adv *adv,
+			struct bt_le_ext_adv_sent_info *info)
+{
+	printk("Advertiser[%d] %p sent %d\n", bt_le_ext_adv_get_index(adv),
+	       adv, info->num_sent);
+}
 
 /* Callback when device is connected */
-static void connected(struct bt_conn *conn, uint8_t err) {
-    if (err) {
+static void connected(struct bt_conn *conn, uint8_t err)
+{
+    if (err)
+    {
         printk("[Node] Connection failed (err %d)\n", err);
         return;
     }
@@ -49,13 +66,19 @@ static void connected(struct bt_conn *conn, uint8_t err) {
 }
 
 /* Callback when device is disconnected */
-static void disconnected(struct bt_conn *conn, uint8_t reason) {
+static void disconnected(struct bt_conn *conn, uint8_t reason)
+{
     printk("[Node] Disconnected (reason %d)\n", reason);
     current_conn = NULL;
-    
+
     // Restart advertising
-    bt_le_adv_start(&adv_params, ad, ARRAY_SIZE(ad), NULL, 0);
+    bt_le_adv_start(&param, ad, ARRAY_SIZE(ad), NULL, 0);
 }
+
+static struct bt_le_ext_adv_start_param ext_adv_start_param = {
+	.timeout = 0,
+	.num_events = 0,
+};
 
 /* BLE Callbacks */
 static struct bt_conn_cb conn_callbacks = {
@@ -63,11 +86,10 @@ static struct bt_conn_cb conn_callbacks = {
     .disconnected = disconnected,
 };
 
-
-
 /* Callback for Configuration Write */
-static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
-                            const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
+static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                            const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
     memcpy(config_data, buf, len);
     printk("[Node] Configuration Updated (Len: %d)\n", len);
     return len;
@@ -75,30 +97,32 @@ static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *att
 
 /* BLE GATT Service and Characteristics */
 BT_GATT_SERVICE_DEFINE(node_service,
-    BT_GATT_PRIMARY_SERVICE(BT_UUID_DECLARE_16(0x180F)), // Battery Service UUID (Example)
+                       BT_GATT_PRIMARY_SERVICE(BT_UUID_DECLARE_16(0x180F)), // Battery Service UUID (Example)
 
-    /* Notify Characteristic (Sensor Data) */
-    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_16(0x2A19),
-        BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_NONE,
-        NULL, NULL, NULL),
+                       /* Notify Characteristic (Sensor Data) */
+                       BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_16(0x2A19),
+                                              BT_GATT_CHRC_NOTIFY,
+                                              BT_GATT_PERM_NONE,
+                                              NULL, NULL, NULL),
 
-    /* Write Characteristic (Configuration Updates) */
-    BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_16(0x2A1A),
-        BT_GATT_CHRC_WRITE,
-        BT_GATT_PERM_WRITE,
-        NULL, write_config, config_data)
-);
+                       /* Write Characteristic (Configuration Updates) */
+                       BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_16(0x2A1A),
+                                              BT_GATT_CHRC_WRITE,
+                                              BT_GATT_PERM_WRITE,
+                                              NULL, write_config, config_data));
 
 /* Sensor Data Notification */
-static void send_sensor_data(void) {
-    if (!current_conn) {
+static void send_sensor_data(void)
+{
+    if (!current_conn)
+    {
         printk("[Node] No active connection. Skipping data send.\n");
         return;
     }
 
     // Fill sensor data with mock values
-    for (int i = 0; i < SENSOR_DATA_SIZE; i++) {
+    for (int i = 0; i < SENSOR_DATA_SIZE; i++)
+    {
         sensor_data[i] = i;
     }
 
@@ -109,42 +133,70 @@ static void send_sensor_data(void) {
     notify_params.user_data = NULL;
 
     int err = bt_gatt_notify_cb(current_conn, &notify_params);
-    if (err) {
+    if (err)
+    {
         printk("[Node] Failed to send sensor data (err %d)\n", err);
-    } else {
+    }
+    else
+    {
         printk("[Node] Sensor data sent!\n");
     }
 }
 
 /* Function to initialize BLE */
-static void init_ble(void) {
+static void init_ble(void)
+{
+    char addr_s[BT_ADDR_LE_STR_LEN];
     int err;
 
     printk("[Node] Initializing BLE...\n");
 
     err = bt_enable(NULL);
-    if (err) {
+    if (err)
+    {
         printk("[Node] Bluetooth initialization failed (err %d)\n", err);
         return;
     }
     printk("[Node] Bluetooth initialized\n");
 
-    bt_conn_cb_register(&conn_callbacks);
+    printk("Advertising set create...");
+	err = bt_le_ext_adv_create(&param, &adv_callbacks, &adv_set);
+	if (err) {
+		printk("failed (err %d)\n", err);
+		return;
+	}
+	printk("success\n");
 
-    /* Start advertising */
-    err = bt_le_adv_start(&adv_params, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (err) {
-        printk("[Node] Advertising failed to start (err %d)\n", err);
-        return;
-    }
-    printk("[Node] Advertising started\n");
+	err = bt_le_ext_adv_set_data(adv_set, ad, ARRAY_SIZE(ad), NULL, 0);
+	if (err) {
+		printk("failed (err %d)\n", err);
+		return;
+	}
+
+	printk("Periodic advertising params set...");
+	err = bt_le_per_adv_set_param(adv_set, &per_adv_param);
+	if (err) {
+		printk("failed (err %d)\n", err);
+		return;
+	}
+	printk("success\n");
+
+    printk("Extended advertising enable...");
+	err = bt_le_ext_adv_start(adv_set, &ext_adv_start_param);
+	if (err) {
+		printk("failed (err %d)\n", err);
+		return;
+	}
+	printk("success\n");
 }
 
 /* Node BLE Thread */
-void node_ble_thread(void) {
+void node_ble_thread(void)
+{
     init_ble();
 
-    while (1) {
+    while (1)
+    {
         send_sensor_data();
         k_sleep(K_SECONDS(10));
     }

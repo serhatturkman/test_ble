@@ -105,14 +105,33 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
                          struct net_buf_simple *ad) {
     char addr_str[BT_ADDR_LE_STR_LEN];
+    char dev_name[30] = {0};
+    uint8_t len;
+    const uint8_t *data;
 
     /* Ignore non-connectable advertising packets */
     if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
         return;
     }
 
+    // Extract device name from advertising packet
+    while (ad->len) {
+        data = net_buf_simple_pull_mem(ad, ad->len);
+        len = data[0] - 1;
+        if (data[1] == BT_DATA_NAME_COMPLETE || data[1] == BT_DATA_NAME_SHORTENED) {
+            memcpy(dev_name, &data[2], len);
+            dev_name[len] = '\0';
+            break;
+        }
+    }
+
     bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-    printk("[Gateway] Device found: %s (RSSI %d)\n", addr_str, rssi);
+    printk("[Gateway] Device found: %s (RSSI %d) Name: %s\n", addr_str, rssi, dev_name);
+
+    // Check if it's our node based on name
+    if (strcmp(dev_name, "Node_Device") != 0) {
+        return;  // Ignore devices that don't match the name
+    }
 
     if (rssi > -70 && !default_conn) {
         struct bt_le_conn_param *conn_params = BT_LE_CONN_PARAM_DEFAULT;
