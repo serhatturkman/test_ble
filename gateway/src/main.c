@@ -1,283 +1,314 @@
+/* main.c - Application main entry point */
+
+/*
+ * Copyright (c) 2015-2016 Intel Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/types.h>
+#include <stddef.h>
+#include <errno.h>
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
 #include <zephyr/sys/printk.h>
+
 #include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/gatt.h>
-#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
-#include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/sys/byteorder.h>
 
-/* Thread Configuration */
-#define STACKSIZE 1024
-#define PRIORITY 7
+static void start_scan(void);
 
-#define CONFIG_UPDATE_INTERVAL K_MINUTES(5)
-#define SCAN_TIMEOUT K_SECONDS(30)
-#define SCAN_RETRY_INTERVAL K_SECONDS(10)
+static struct bt_conn *default_conn;
 
-#define SENSOR_DATA_SIZE 20
-#define CONFIG_DATA_SIZE 100
-
-static struct bt_conn *default_conn = NULL;
+static struct bt_uuid_16 discover_uuid = BT_UUID_INIT_16(0);
+static struct bt_gatt_discover_params discover_params;
 static struct bt_gatt_subscribe_params subscribe_params;
-static uint8_t config_data[CONFIG_DATA_SIZE] = {0};
-static uint16_t config_handle = 0; // Will store the characteristic handle for config writes
 
-static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                             struct bt_gatt_discover_params *params);
+uint64_t total_rx_count; /* This value is exposed to test code */
 
-/* Scan parameters */
-static const struct bt_le_scan_param scan_params = {
-    .type = BT_HCI_LE_SCAN_PASSIVE,
-    .options = BT_LE_SCAN_OPT_NONE,
-    .interval = 0x0010,
-    .window = 0x0010,
-};
-
-static struct bt_gatt_discover_params discover_params = {
-    .uuid = NULL,
-    .func = discover_func, // ✅ Correct function assignment
-    .start_handle = 0x0001,
-    .end_handle = 0xFFFF,
-    .type = BT_GATT_DISCOVER_ATTRIBUTE};
-
-/* Callback function for receiving sensor data */
-static uint8_t sensor_data_received(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-                                    const void *data, uint16_t len)
+static uint8_t notify_func(struct bt_conn *conn,
+                           struct bt_gatt_subscribe_params *params,
+                           const void *data, uint16_t length)
 {
-    printk("[Gateway] Received Sensor Data (%d bytes)\n", len);
+    if (!data)
+    {
+        printk("[UNSUBSCRIBED]\n");
+        params->value_handle = 0U;
+        return BT_GATT_ITER_STOP;
+    }
 
-    const uint8_t *received_data = (const uint8_t *)data;
-    printk("[Gateway] Data: %02X %02X %02X ...\n", received_data[0], received_data[1], received_data[2]);
+    printk("[NOTIFICATION] data %p length %u\n", data, length);
+
+    total_rx_count++;
 
     return BT_GATT_ITER_CONTINUE;
 }
 
-/* BLE Connection Callback */
-static void connected(struct bt_conn *conn, uint8_t err)
+static uint8_t discover_func(struct bt_conn *conn,
+                             const struct bt_gatt_attr *attr,
+                             struct bt_gatt_discover_params *params)
 {
-    if (err)
+    int err;
+
+    if (!attr)
     {
-        printk("[Gateway] Connection failed (err %d)\n", err);
-        return;
+        printk("Discover complete\n");
+        (void)memset(params, 0, sizeof(*params));
+        return BT_GATT_ITER_STOP;
     }
 
-    printk("[Gateway] Connected to Node!\n");
-    default_conn = conn;
+    printk("[ATTRIBUTE] handle %u\n", attr->handle);
 
-    discover_params.uuid = BT_UUID_DECLARE_16(0x180F); // Node service UUID
-    discover_params.start_handle = 0x0001;
-    discover_params.end_handle = 0xFFFF;
-    discover_params.type = BT_GATT_DISCOVER_PRIMARY;
-
-    int ret = bt_gatt_discover(conn, &discover_params);
-    if (ret)
+    if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_HRS))
     {
-        printk("[Gateway] Failed to start service discovery (err %d)\n", ret);
+        memcpy(&discover_uuid, BT_UUID_HRS_MEASUREMENT, sizeof(discover_uuid));
+        discover_params.uuid = &discover_uuid.uuid;
+        discover_params.start_handle = attr->handle + 1;
+        discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+        err = bt_gatt_discover(conn, &discover_params);
+        if (err)
+        {
+            printk("Discover failed (err %d)\n", err);
+        }
+    }
+    else if (!bt_uuid_cmp(discover_params.uuid,
+                          BT_UUID_HRS_MEASUREMENT))
+    {
+        memcpy(&discover_uuid, BT_UUID_GATT_CCC, sizeof(discover_uuid));
+        discover_params.uuid = &discover_uuid.uuid;
+        discover_params.start_handle = attr->handle + 2;
+        discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+        subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
+
+        err = bt_gatt_discover(conn, &discover_params);
+        if (err)
+        {
+            printk("Discover failed (err %d)\n", err);
+        }
     }
     else
     {
-        printk("[Gateway] Started GATT service discovery...\n");
+        subscribe_params.notify = notify_func;
+        subscribe_params.value = BT_GATT_CCC_NOTIFY;
+        subscribe_params.ccc_handle = attr->handle;
+
+        err = bt_gatt_subscribe(conn, &subscribe_params);
+        if (err && err != -EALREADY)
+        {
+            printk("Subscribe failed (err %d)\n", err);
+        }
+        else
+        {
+            printk("[SUBSCRIBED]\n");
+        }
+
+        return BT_GATT_ITER_STOP;
     }
+
+    return BT_GATT_ITER_STOP;
 }
 
-/* BLE Disconnection Callback */
-static void disconnected(struct bt_conn *conn, uint8_t reason)
+static bool eir_found(struct bt_data *data, void *user_data)
 {
-    printk("[Gateway] Disconnected (reason %d)\n", reason);
-    default_conn = NULL;
+    bt_addr_le_t *addr = user_data;
+    int i;
 
-    /* Wait before restarting scan */
-    k_sleep(K_SECONDS(5));
+    printk("[AD]: %u data_len %u\n", data->type, data->data_len);
 
-    int err = bt_le_scan_start(&scan_params, NULL);
-    if (err)
+    switch (data->type)
     {
-        printk("[Gateway] Scanning failed to restart (err %d)\n", err);
+    case BT_DATA_UUID16_SOME:
+    case BT_DATA_UUID16_ALL:
+        if (data->data_len % sizeof(uint16_t) != 0U)
+        {
+            printk("AD malformed\n");
+            return true;
+        }
+
+        for (i = 0; i < data->data_len; i += sizeof(uint16_t))
+        {
+            struct bt_conn_le_create_param *create_param;
+            struct bt_le_conn_param *param;
+            const struct bt_uuid *uuid;
+            uint16_t u16;
+            int err;
+
+            memcpy(&u16, &data->data[i], sizeof(u16));
+            uuid = BT_UUID_DECLARE_16(sys_le16_to_cpu(u16));
+            if (bt_uuid_cmp(uuid, BT_UUID_HRS))
+            {
+                continue;
+            }
+
+            err = bt_le_scan_stop();
+            if (err)
+            {
+                printk("Stop LE scan failed (err %d)\n", err);
+                continue;
+            }
+
+            printk("Creating connection with Coded PHY support\n");
+            param = BT_LE_CONN_PARAM_DEFAULT;
+            create_param = BT_CONN_LE_CREATE_CONN;
+            create_param->options |= BT_CONN_LE_OPT_CODED;
+            err = bt_conn_le_create(addr, create_param, param,
+                                    &default_conn);
+            if (err)
+            {
+                printk("Create connection with Coded PHY support failed (err %d)\n",
+                       err);
+
+                printk("Creating non-Coded PHY connection\n");
+                create_param->options &= ~BT_CONN_LE_OPT_CODED;
+                err = bt_conn_le_create(addr, create_param,
+                                        param, &default_conn);
+                if (err)
+                {
+                    printk("Create connection failed (err %d)\n", err);
+                    start_scan();
+                }
+            }
+
+            return false;
+        }
     }
-    else
-    {
-        printk("[Gateway] Restarting scan for nodes...\n");
-    }
+
+    return true;
 }
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
-                         struct net_buf_simple *ad) {
-    char addr_str[BT_ADDR_LE_STR_LEN];
-    char dev_name[30] = {0};
-    uint8_t len;
-    const uint8_t *data;
+                         struct net_buf_simple *ad)
+{
+    char dev[BT_ADDR_LE_STR_LEN];
 
-    /* Ignore non-connectable advertising packets */
-    if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
-        return;
+    bt_addr_le_to_str(addr, dev, sizeof(dev));
+
+    /* We're only interested in legacy connectable events or
+     * possible extended advertising that are connectable.
+     */
+    // if (type == BT_GAP_ADV_TYPE_ADV_IND ||
+    //     type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND ||
+    //     type == BT_GAP_ADV_TYPE_EXT_ADV)
+    if (type == BT_GAP_ADV_TYPE_EXT_ADV)
+    {
+        printk("[DEVICE]: %s, AD evt type %u, AD data len %u, RSSI %i\n",
+               dev, type, ad->len, rssi);
+        bt_data_parse(ad, eir_found, (void *)addr);
     }
+}
 
-    // Extract device name from advertising packet
-    while (ad->len) {
-        data = net_buf_simple_pull_mem(ad, ad->len);
-        len = data[0] - 1;
-        if (data[1] == BT_DATA_NAME_COMPLETE || data[1] == BT_DATA_NAME_SHORTENED) {
-            memcpy(dev_name, &data[2], len);
-            dev_name[len] = '\0';
-            break;
+static void start_scan(void)
+{
+    int err;
+
+    /* Use active scanning and disable duplicate filtering to handle any
+     * devices that might update their advertising data at runtime. */
+    struct bt_le_scan_param scan_param = {
+        .type = BT_LE_SCAN_TYPE_ACTIVE,
+        .options = BT_LE_SCAN_OPT_CODED,
+        .interval = BT_GAP_SCAN_FAST_INTERVAL,
+        .window = BT_GAP_SCAN_FAST_WINDOW,
+    };
+
+    err = bt_le_scan_start(&scan_param, device_found);
+    if (err)
+    {
+        printk("Scanning with Coded PHY support failed (err %d)\n", err);
+
+        printk("Scanning without Coded PHY\n");
+        scan_param.options &= ~BT_LE_SCAN_OPT_CODED;
+        err = bt_le_scan_start(&scan_param, device_found);
+        if (err)
+        {
+            printk("Scanning failed to start (err %d)\n", err);
+            return;
         }
     }
 
-    bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-    printk("[Gateway] Device found: %s (RSSI %d) Name: %s\n", addr_str, rssi, dev_name);
+    printk("Scanning successfully started\n");
+}
 
-    // Check if it's our node based on name
-    if (strcmp(dev_name, "Node_Device") != 0) {
-        return;  // Ignore devices that don't match the name
+static void connected(struct bt_conn *conn, uint8_t conn_err)
+{
+    char addr[BT_ADDR_LE_STR_LEN];
+    int err;
+
+    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+    if (conn_err)
+    {
+        printk("Failed to connect to %s (%u)\n", addr, conn_err);
+
+        bt_conn_unref(default_conn);
+        default_conn = NULL;
+
+        start_scan();
+        return;
     }
 
-    if (rssi > -70 && !default_conn) {
-        struct bt_le_conn_param *conn_params = BT_LE_CONN_PARAM_DEFAULT;
-        int err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, conn_params, &default_conn);
-        if (err) {
-            printk("[Gateway] Connection failed (err %d)\n", err);
-        } else {
-            printk("[Gateway] Connecting to node...\n");
+    printk("Connected: %s\n", addr);
+
+    total_rx_count = 0U;
+
+    if (conn == default_conn)
+    {
+        memcpy(&discover_uuid, BT_UUID_HRS, sizeof(discover_uuid));
+        discover_params.uuid = &discover_uuid.uuid;
+        discover_params.func = discover_func;
+        discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+        discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+        discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+
+        err = bt_gatt_discover(default_conn, &discover_params);
+        if (err)
+        {
+            printk("Discover failed(err %d)\n", err);
+            return;
         }
     }
 }
 
-/* BLE Callbacks */
-static struct bt_conn_cb conn_callbacks = {
+static void disconnected(struct bt_conn *conn, uint8_t reason)
+{
+    char addr[BT_ADDR_LE_STR_LEN];
+
+    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+    printk("Disconnected: %s, reason 0x%02x %s\n", addr, reason, bt_hci_err_to_str(reason));
+
+    if (default_conn != conn)
+    {
+        return;
+    }
+
+    bt_conn_unref(default_conn);
+    default_conn = NULL;
+
+    start_scan();
+}
+
+BT_CONN_CB_DEFINE(conn_callbacks) = {
     .connected = connected,
     .disconnected = disconnected,
 };
 
-/* GATT Discovery Callback */
-static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                             struct bt_gatt_discover_params *params)
-{
-    if (!attr)
-    {
-        printk("[Gateway] Discovery complete.\n");
-        return BT_GATT_ITER_STOP;
-    }
-
-    struct bt_gatt_service_val *service;
-    uint16_t handle = attr->handle;
-
-    if (params->type == BT_GATT_DISCOVER_PRIMARY)
-    {
-        /* Check if we found the right service */
-        service = (struct bt_gatt_service_val *)attr->user_data;
-        if (bt_uuid_cmp(service->uuid, BT_UUID_DECLARE_16(0x180F)) == 0)
-        {
-            printk("[Gateway] Found Node GATT Service!\n");
-
-            /* Now discover characteristics within this service */
-            discover_params.start_handle = handle + 1;
-            discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
-            int err = bt_gatt_discover(conn, &discover_params);
-            if (err)
-            {
-                printk("[Gateway] Failed to start characteristic discovery (err %d)\n", err);
-            }
-        }
-    }
-    else if (params->type == BT_GATT_DISCOVER_CHARACTERISTIC)
-    {
-        /* Identify characteristics for sensor data and config */
-        printk("[Gateway] Discovered Characteristic Handle: 0x%04X\n", handle);
-
-        if (!subscribe_params.ccc_handle)
-        {
-            subscribe_params.ccc_handle = handle;
-            subscribe_params.notify = sensor_data_received;
-            int err = bt_gatt_subscribe(conn, &subscribe_params);
-            if (err)
-            {
-                printk("[Gateway] Subscription failed (err %d)\n", err);
-            }
-            else
-            {
-                printk("[Gateway] Subscribed to sensor data!\n");
-            }
-        }
-        else if (!config_handle)
-        {
-            config_handle = handle;
-            printk("[Gateway] Found Config Write Handle: 0x%04X\n", config_handle);
-        }
-    }
-
-    return BT_GATT_ITER_CONTINUE;
-}
-
-/* Send Configuration Update */
-static void send_configuration_update(void)
-{
-    if (!default_conn)
-    {
-        printk("[Gateway] No active connection. Skipping config update.\n");
-        return;
-    }
-
-    if (config_handle == 0)
-    {
-        printk("[Gateway] Config handle not found. Skipping config update.\n");
-        return;
-    }
-
-    config_data[0]++;
-    config_data[1]++;
-
-    int err = bt_gatt_write_without_response(default_conn, config_handle, config_data, CONFIG_DATA_SIZE, false);
-    if (err)
-    {
-        printk("[Gateway] Config update failed (err %d)\n", err);
-    }
-    else
-    {
-        printk("[Gateway] Config update sent to Node\n");
-    }
-}
-
-/* Bluetooth Connection Handler */
-void bluetooth_connection(void)
+int main(void)
 {
     int err;
-    printk("[Gateway] Starting BLE Central application\n");
-
     err = bt_enable(NULL);
+
     if (err)
     {
-        printk("[Gateway] Bluetooth initialization failed (err %d)\n", err);
-        return;
+        printk("Bluetooth init failed (err %d)\n", err);
+        return 0;
     }
-    printk("[Gateway] Bluetooth initialized\n");
 
-    bt_conn_cb_register(&conn_callbacks);
+    printk("Bluetooth initialized\n");
 
-    while (1)
-    {
-        if (!default_conn)
-        {
-            printk("[Gateway] Scanning for nodes (Timeout: 30s)...\n");
-            err = bt_le_scan_start(&scan_params, device_found);
-            if (err)
-            {
-                printk("[Gateway] Scanning failed to start (err %d)\n", err);
-                k_sleep(SCAN_RETRY_INTERVAL);
-                continue;
-            }
-            k_sleep(SCAN_TIMEOUT);
-            bt_le_scan_stop();
-            printk("[Gateway] Scan timeout, retrying in 10s...\n");
-            k_sleep(SCAN_RETRY_INTERVAL);
-        }
-        else
-        {
-            send_configuration_update();
-        }
-        k_sleep(CONFIG_UPDATE_INTERVAL);
-    }
+    start_scan();
+    return 0;
 }
-
-K_THREAD_DEFINE(bluetooth_connection_id, STACKSIZE, bluetooth_connection, NULL, NULL, NULL, PRIORITY, 0, 0);
