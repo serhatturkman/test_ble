@@ -1,28 +1,34 @@
-mainmenu "Zephyr Kernel Configuration"
-
 source "Kconfig.zephyr"
 
-menuconfig BT_HRS_CLIENT
+config BT
+    bool "Bluetooth"
+    select NET_BUF
+    depends on !SMP
+    default y
+    help
+      This option enables Bluetooth support.
+
+config BT_HRS_CLIENT
     bool "Heart Rate Service client"
     select BT_NRF_SERVICES
     depends on BT
     help
       Enable Heart Rate Service client
 
-menuconfig BT_GATT_DM
+config BT_GATT_DM
     bool "GATT Discovery Manager library"
     depends on BT
     help
       Enable BLE GATT Discovery Manager library
 
-menuconfig BT_SCAN
+config BT_SCAN
     bool "Scan library"
     default n
     depends on BT_CENTRAL && BT
     help
       Enable BLE Scan library
 
-menuconfig BT_SCAN_FILTER_ENABLE
+config BT_SCAN_FILTER_ENABLE
     bool "Enabling filters for the Scan library."
     default n
     depends on BT_SCAN && BT
