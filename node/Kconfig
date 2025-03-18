@@ -2,6 +2,6 @@ menu "Zephyr"
 source "Kconfig.zephyr"
 endmenu
 
-module = Gateway
-module-str = Gateway
+module = Node
+module-str = Node
 source "subsys/logging/Kconfig.template.log_config"
