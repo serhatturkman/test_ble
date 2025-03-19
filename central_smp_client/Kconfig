@@ -1,0 +1,56 @@
+menu "Zephyr"
+source "Kconfig.zephyr"
+
+config NCS_SAMPLES_DEFAULTS
+    bool "Enable NCS sample default settings"
+    default n
+    imply LOG
+    imply LOG_DEFAULT_MINIMAL
+    imply ASSERT
+    imply ASSERT_NO_COND_INFO
+    imply ASSERT_NO_MSG_INFO
+    imply HW_STACK_PROTECTION if ARCH_HAS_STACK_PROTECTION
+    help
+      Use the default configuration for NCS samples.
+
+config BT_GATT_DM
+	bool "GATT Discovery Manager library"
+	help
+	  Enable BLE GATT Discovery Manager library
+
+config BT_DFU_SMP
+	bool "DFU SMP service client"
+	select BT_NRF_SERVICES
+	help
+	  Enable GATT DFU SMP Service Client.
+
+config BT_SCAN
+    bool "Scan library"
+    default n
+    depends on BT_CENTRAL && BT
+    help
+      Enable BLE Scan library
+
+config BT_SCAN_FILTER_ENABLE
+    bool "Enabling filters for the Scan library."
+    default n
+    depends on BT_SCAN && BT
+    help
+      Enabling filters for the Scan library.
+
+config BT_SCAN_UUID_CNT
+    int "Number of filters for UUIDs."
+    default 0
+    depends on BT_SCAN_FILTER_ENABLE && BT_SCAN && BT
+    help
+      Number of filters for UUIDs
+
+config DK_LIBRARY
+    bool "Button and LED Library for Nordic DKs"
+    select GPIO
+
+endmenu
+
+module = Central SMP Client
+module-str = Central SMP Client
+source "subsys/logging/Kconfig.template.log_config"
