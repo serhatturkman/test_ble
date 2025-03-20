@@ -22,12 +22,11 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(smp_sample);
 
+#include <string.h>
 #include "common.h"
-#include "bluetooth.h"
-#include "littlefs_sample.h"
 
-#define STORAGE_PARTITION_LABEL	storage_partition
-#define STORAGE_PARTITION_ID	FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
+#define STORAGE_PARTITION_LABEL storage_partition
+#define STORAGE_PARTITION_ID FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
 
 /* Define an example stats group; approximates seconds since boot. */
 STATS_SECT_START(smp_svr_stats)
@@ -40,7 +39,8 @@ STATS_NAME(smp_svr_stats, ticks)
 STATS_NAME_END(smp_svr_stats);
 
 /* Define an instance of the stats group. */
-STATS_SECT_DECL(smp_svr_stats) smp_svr_stats;
+STATS_SECT_DECL(smp_svr_stats)
+smp_svr_stats;
 
 #ifdef CONFIG_MCUMGR_GRP_FS
 FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(cstorage);
@@ -48,23 +48,82 @@ static struct fs_mount_t littlefs_mnt = {
 	.type = FS_LITTLEFS,
 	.fs_data = &cstorage,
 	.storage_dev = (void *)STORAGE_PARTITION_ID,
-	.mnt_point = "/lfs1"
-};
+	.mnt_point = "/lfs1"};
 #endif
+
+static int create_measurement_file(char *file_name, const void *measurement_value, int size)
+{
+	struct fs_file_t file;
+	int rc, ret;
+	fs_file_t_init(&file);
+
+	rc = fs_open(&file, file_name, FS_O_CREATE | FS_O_RDWR | FS_O_TRUNC);
+	if (rc < 0)
+	{
+		LOG_ERR("FAIL: open %s: %d", file_name, rc);
+		return rc;
+	}
+	rc = fs_write(&file, measurement_value, size);
+	if (rc < 0)
+	{
+		LOG_ERR("FAIL: write %s: %d", file_name, rc);
+		return rc;
+	}
+	ret = fs_close(&file);
+	if (ret < 0)
+	{
+		LOG_ERR("FAIL: close %s: %d", file_name, ret);
+		return ret;
+	}
+	return 0;
+}
+
+int test_create_text_file(void) 
+{
+	char test_string[] = "caoi bella aq";
+	int ret = create_measurement_file("/lfs1/test_string.txt", test_string, sizeof(test_string));
+	if (ret < 0)
+	{
+		LOG_ERR("Failed to create test string file [%d]", ret);
+	}
+	else
+	{
+		LOG_INF("Test String file created successfully");
+	}
+	return ret;
+}
+
+int test_create_binary_file(void) 
+{
+	uint16_t test_16_bit_measurement[] = {0x1234, 0x5678, 0x9ABC, 0xDEF0};
+	int ret = create_measurement_file("/lfs1/test_16_bit.bin", test_16_bit_measurement, sizeof(test_16_bit_measurement));
+	if (ret < 0)
+	{
+		LOG_ERR("Failed to create 16-bit measurement file [%d]", ret);
+
+	}
+	else
+	{
+		LOG_INF("Test 16-bit Measurement file created successfully");
+	}	
+	return ret;
+}
 
 int main(void)
 {
 	int rc = STATS_INIT_AND_REG(smp_svr_stats, STATS_SIZE_32,
-				    "smp_svr_stats");
+								"smp_svr_stats");
 
-	if (rc < 0) {
+	if (rc < 0)
+	{
 		LOG_ERR("Error initializing stats system [%d]", rc);
 	}
 
 	/* Register the built-in mcumgr command handlers. */
 #ifdef CONFIG_MCUMGR_GRP_FS
 	rc = fs_mount(&littlefs_mnt);
-	if (rc < 0) {
+	if (rc < 0)
+	{
 		LOG_ERR("Error mounting littlefs [%d]", rc);
 	}
 #endif
@@ -73,11 +132,13 @@ int main(void)
 	start_smp_bluetooth_adverts();
 #endif
 
-	if (IS_ENABLED(CONFIG_USB_DEVICE_STACK)) {
+	if (IS_ENABLED(CONFIG_USB_DEVICE_STACK))
+	{
 		rc = usb_enable(NULL);
 
 		/* Ignore EALREADY error as USB CDC is likely already initialised */
-		if (rc != 0 && rc != -EALREADY) {
+		if (rc != 0 && rc != -EALREADY)
+		{
 			LOG_ERR("Failed to enable USB");
 			return 0;
 		}
@@ -87,15 +148,20 @@ int main(void)
 	 */
 	LOG_INF("build time: " __DATE__ " " __TIME__);
 
-	uint16_t measurement_value[] = {0x1234, 0x3255, 0x3213};
-	int ret = create_measurement("test.txt", measurement_value, sizeof(measurement_value));
-	if (ret < 0) {
-		LOG_ERR("Failed to create measurement file [%d]", ret);
+	if(test_create_text_file() != 0) 
+	{
+		return 0;
 	}
+	if(test_create_binary_file() != 0)
+	{
+		return 0;
+	}
+
 	/* The system work queue handles all incoming mcumgr requests.  Let the
 	 * main thread idle while the mcumgr server runs.
 	 */
-	while (1) {
+	while (1)
+	{
 		k_sleep(K_MSEC(1000));
 		STATS_INC(smp_svr_stats, ticks);
 	}
