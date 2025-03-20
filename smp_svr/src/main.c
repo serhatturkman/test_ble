@@ -23,6 +23,8 @@
 LOG_MODULE_REGISTER(smp_sample);
 
 #include "common.h"
+#include "bluetooth.h"
+#include "littlefs_sample.h"
 
 #define STORAGE_PARTITION_LABEL	storage_partition
 #define STORAGE_PARTITION_ID	FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
@@ -85,6 +87,11 @@ int main(void)
 	 */
 	LOG_INF("build time: " __DATE__ " " __TIME__);
 
+	uint16_t measurement_value[] = {0x1234, 0x3255, 0x3213};
+	int ret = create_measurement("test.txt", measurement_value, sizeof(measurement_value));
+	if (ret < 0) {
+		LOG_ERR("Failed to create measurement file [%d]", ret);
+	}
 	/* The system work queue handles all incoming mcumgr requests.  Let the
 	 * main thread idle while the mcumgr server runs.
 	 */
