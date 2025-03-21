@@ -1,0 +1,15 @@
+#include "nrf52840dk_nrf52840_pinctrl.dtsi"
+
+/ {
+    aliases {
+        pdm-dev = &pdm0;
+    };
+};
+
+/* PDM Configuration */
+dmic_dev: &pdm0 {
+	status = "okay";
+	pinctrl-0 = <&pdm0_default_alt>;
+	pinctrl-names = "default";
+	clock-source = "PCLK32M_HFXO";
+};

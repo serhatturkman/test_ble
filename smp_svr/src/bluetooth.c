@@ -31,7 +31,8 @@ static void advertise(struct k_work *work)
 	int rc;
 
 	rc = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	if (rc) {
+	if (rc)
+	{
 		LOG_ERR("Advertising failed to start (rc %d)", rc);
 		return;
 	}
@@ -41,10 +42,13 @@ static void advertise(struct k_work *work)
 
 static void connected(struct bt_conn *conn, uint8_t err)
 {
-	if (err) {
+	if (err)
+	{
 		LOG_ERR("Connection failed, err 0x%02x %s", err, bt_hci_err_to_str(err));
 		k_work_submit(&advertise_work);
-	} else {
+	}
+	else
+	{
 		LOG_INF("Connected");
 	}
 }
@@ -67,9 +71,12 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 static void bt_ready(int err)
 {
-	if (err != 0) {
+	if (err != 0)
+	{
 		LOG_ERR("Bluetooth failed to initialise: %d", err);
-	} else {
+	}
+	else
+	{
 		k_work_submit(&advertise_work);
 	}
 }
@@ -81,7 +88,8 @@ void start_smp_bluetooth_adverts(void)
 	k_work_init(&advertise_work, advertise);
 	rc = bt_enable(bt_ready);
 
-	if (rc != 0) {
+	if (rc != 0)
+	{
 		LOG_ERR("Bluetooth enable failed: %d", rc);
 	}
 }

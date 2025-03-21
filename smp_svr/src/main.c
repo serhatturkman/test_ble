@@ -9,6 +9,9 @@
 #include <zephyr/stats/stats.h>
 #include <zephyr/usb/usb_device.h>
 
+#include "pdm.h"
+#include "pwm.h"
+
 #ifdef CONFIG_MCUMGR_GRP_FS
 #include <zephyr/device.h>
 #include <zephyr/fs/fs.h>
@@ -24,6 +27,17 @@ LOG_MODULE_REGISTER(smp_sample);
 
 #include <string.h>
 #include "common.h"
+
+/* size of stack area used by each thread */
+#define STACKSIZE 1024
+
+/* scheduling priority used by main thread */
+#define MAIN_THREAD_PRIORITY 1
+
+/* scheduling priority used by other threads */
+#define OTHER_THREAD_PRIORITY 1
+
+K_FIFO_DEFINE(printk_fifo);
 
 #define STORAGE_PARTITION_LABEL storage_partition
 #define STORAGE_PARTITION_ID FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
@@ -51,7 +65,7 @@ static struct fs_mount_t littlefs_mnt = {
 	.mnt_point = "/lfs1"};
 #endif
 
-static int create_measurement_file(char *file_name, const void *measurement_value, int size)
+static int create_file(char *file_name, const void *measurement_value, int size)
 {
 	struct fs_file_t file;
 	int rc, ret;
@@ -78,10 +92,10 @@ static int create_measurement_file(char *file_name, const void *measurement_valu
 	return 0;
 }
 
-int test_create_text_file(void) 
+int test_create_text_file(void)
 {
 	char test_string[] = "caoi bella aq";
-	int ret = create_measurement_file("/lfs1/test_string.txt", test_string, sizeof(test_string));
+	int ret = create_file("/lfs1/test_string.txt", test_string, sizeof(test_string));
 	if (ret < 0)
 	{
 		LOG_ERR("Failed to create test string file [%d]", ret);
@@ -93,19 +107,18 @@ int test_create_text_file(void)
 	return ret;
 }
 
-int test_create_binary_file(void) 
+int test_create_binary_file(void)
 {
 	uint16_t test_16_bit_measurement[] = {0x1234, 0x5678, 0x9ABC, 0xDEF0};
-	int ret = create_measurement_file("/lfs1/test_16_bit.bin", test_16_bit_measurement, sizeof(test_16_bit_measurement));
+	int ret = create_file("/lfs1/test_16_bit.bin", test_16_bit_measurement, sizeof(test_16_bit_measurement));
 	if (ret < 0)
 	{
 		LOG_ERR("Failed to create 16-bit measurement file [%d]", ret);
-
 	}
 	else
 	{
 		LOG_INF("Test 16-bit Measurement file created successfully");
-	}	
+	}
 	return ret;
 }
 
@@ -148,22 +161,23 @@ int main(void)
 	 */
 	LOG_INF("build time: " __DATE__ " " __TIME__);
 
-	if(test_create_text_file() != 0) 
+	if (test_create_text_file() != 0)
 	{
 		return 0;
 	}
-	if(test_create_binary_file() != 0)
+	if (test_create_binary_file() != 0)
 	{
 		return 0;
 	}
-
 	/* The system work queue handles all incoming mcumgr requests.  Let the
 	 * main thread idle while the mcumgr server runs.
 	 */
 	while (1)
 	{
-		k_sleep(K_MSEC(1000));
+		k_sleep(K_MSEC(50000));
 		STATS_INC(smp_svr_stats, ticks);
 	}
 	return 0;
 }
+
+K_THREAD_DEFINE(pdm_thread_id, STACKSIZE, pdm_test, NULL, NULL, NULL, OTHER_THREAD_PRIORITY, 0, 0);

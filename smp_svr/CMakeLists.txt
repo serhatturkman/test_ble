@@ -9,8 +9,29 @@ cmake_minimum_required(VERSION 3.20.0)
 # mcumgr.  It can be used as a starting point for new applications.
 
 # Standard Zephyr application boilerplate.
-find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(smp_svr)
+# find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+# project(smp_svr)
 
-target_sources(app PRIVATE src/main.c)
-target_sources_ifdef(CONFIG_MCUMGR_TRANSPORT_BT app PRIVATE src/bluetooth.c)
+# target_sources(app PRIVATE src/main.c)
+# target_sources_ifdef(CONFIG_MCUMGR_TRANSPORT_BT app PRIVATE src/bluetooth.c)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(smp_svr LANGUAGES C)
+
+# Include directories
+include_directories(
+    include
+    include/private
+)
+
+# Add source files
+file(GLOB_RECURSE APP_SOURCES
+    "src/*.c"
+    "drivers/*.c"
+    "lib/*.c"
+)
+
+
+target_include_directories(app PRIVATE include)
+target_sources(app PRIVATE
+    ${APP_SOURCES}
+)
