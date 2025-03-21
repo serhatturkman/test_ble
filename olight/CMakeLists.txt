@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.20.0)
 # target_sources(app PRIVATE src/main.c)
 # target_sources_ifdef(CONFIG_MCUMGR_TRANSPORT_BT app PRIVATE src/bluetooth.c)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(smp_svr LANGUAGES C)
+project(olight LANGUAGES C)
 
 # Include directories
 include_directories(
