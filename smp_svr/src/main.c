@@ -174,7 +174,10 @@ int main(void)
 	 */
 	while (1)
 	{
+		k_sleep(K_MSEC(5000));
+		stop_smp_bluetooth_adverts();
 		k_sleep(K_MSEC(50000));
+		start_smp_bluetooth_adverts();
 		STATS_INC(smp_svr_stats, ticks);
 	}
 	return 0;

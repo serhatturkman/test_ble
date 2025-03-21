@@ -5,3 +5,4 @@
  */
 
 void start_smp_bluetooth_adverts(void);
+void stop_smp_bluetooth_adverts(void);

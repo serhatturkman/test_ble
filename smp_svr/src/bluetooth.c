@@ -26,7 +26,7 @@ static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
-static void advertise(struct k_work *work)
+static void start_advertising(struct k_work *work)
 {
 	int rc;
 
@@ -39,6 +39,22 @@ static void advertise(struct k_work *work)
 
 	LOG_INF("Advertising successfully started");
 }
+
+static void stop_advertising(struct k_work *work)
+{
+	int rc;
+
+	rc = bt_le_adv_stop();
+	if (rc)
+	{
+		LOG_ERR("Advertising failed to stop (rc %d)", rc);
+		return;
+	}
+
+	LOG_INF("Advertising successfully stopped");
+}
+
+
 
 static void connected(struct bt_conn *conn, uint8_t err)
 {
@@ -85,11 +101,25 @@ void start_smp_bluetooth_adverts(void)
 {
 	int rc;
 
-	k_work_init(&advertise_work, advertise);
+	k_work_init(&advertise_work, start_advertising
+);
 	rc = bt_enable(bt_ready);
 
 	if (rc != 0)
 	{
 		LOG_ERR("Bluetooth enable failed: %d", rc);
+	}
+}
+
+void stop_smp_bluetooth_adverts(void)
+{
+	int rc;
+
+	k_work_init(&advertise_work, stop_advertising);
+	rc = bt_disable();
+
+	if (rc != 0)
+	{
+		LOG_ERR("Bluetooth disable failed: %d", rc);
 	}
 }
