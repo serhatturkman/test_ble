@@ -122,7 +122,40 @@ int test_create_binary_file(void)
 	return ret;
 }
 
-int main(void)
+// Define states for the BLE cycle
+enum ble_state
+{
+	BLE_ACTIVE,
+	BLE_SLEEPING
+};
+
+// Shared state variable
+static enum ble_state current_state = BLE_ACTIVE;
+
+// Thread function for BLE cycle
+static void ble_cycle_thread(void *arg1, void *arg2, void *arg3)
+{
+	while (1)
+	{
+		switch (current_state)
+		{
+		case BLE_ACTIVE:
+			start_smp_bluetooth_adverts();
+			k_sleep(K_MSEC(5000));
+			current_state = BLE_SLEEPING;
+			break;
+
+		case BLE_SLEEPING:
+			stop_smp_bluetooth_adverts();
+			k_sleep(K_MSEC(50000));
+			current_state = BLE_ACTIVE;
+			break;
+		}
+		STATS_INC(smp_svr_stats, ticks);
+	}
+}
+
+static int main_init(void)
 {
 	int rc = STATS_INIT_AND_REG(smp_svr_stats, STATS_SIZE_32,
 								"smp_svr_stats");
@@ -169,18 +202,31 @@ int main(void)
 	{
 		return 0;
 	}
+}
+
+int main(void)
+{
+	if (main_init() == 0)
+	{
+		return 0;
+	}
 	/* The system work queue handles all incoming mcumgr requests.  Let the
 	 * main thread idle while the mcumgr server runs.
 	 */
+	// Main loop handles only system tasks
 	while (1)
 	{
-		k_sleep(K_MSEC(5000));
-		stop_smp_bluetooth_adverts();
-		k_sleep(K_MSEC(50000));
-		start_smp_bluetooth_adverts();
-		STATS_INC(smp_svr_stats, ticks);
+		k_sleep(K_FOREVER);
 	}
 	return 0;
 }
+// Thread definition
+K_THREAD_DEFINE(ble_cycle_thread_id,
+				1024,			   // Stack size
+				ble_cycle_thread,  // Thread function
+				NULL, NULL, NULL,  // Args
+				K_PRIO_PREEMPT(1), // Priority
+				0,				   // Options
+				0);
 
 K_THREAD_DEFINE(pdm_thread_id, STACKSIZE, pdm_test, NULL, NULL, NULL, OTHER_THREAD_PRIORITY, 0, 0);
